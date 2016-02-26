@@ -64,17 +64,15 @@ public class CSTESpark {
     SPAM_ORDER_MAP.put("UBIQUITY_LOW_QUALITY", 1);
   }
 
-
   @SuppressWarnings({ "resource", "unchecked" })
   public static void main(String[] args) throws IOException {
 
-    Configuration hadoopConf=new Configuration();
-    FileSystem fs =FileSystem.get(hadoopConf);
+    Configuration hadoopConf = new Configuration();
+    FileSystem fs = FileSystem.get(hadoopConf);
     fs.deleteOnExit(new Path("/user/sidas/spark_cste"));
 
     SparkConf conf = new SparkConf().setAppName("SparkContentFilteringSpam");
     JavaSparkContext sc = new JavaSparkContext(conf);
-//    String path = "/data/tracking/ContentSpamTrackingEvent/daily/2016/02/06/part-r-17184918.1454844685139.avro";
     String path = "/data/tracking/ContentSpamTrackingEvent/daily/2016/02/06";
 
     //val avroRDD = sc.hadoopFile[AvroWrapper[GenericRecord], NullWritable, AvroInputFormat[GenericRecord]](path);
@@ -89,7 +87,6 @@ public class CSTESpark {
               && line._1.datum().get("contentClassificationTrackingId") != null;
         });
 
-
     JavaPairRDD<Tuple3<String, String, byte[]>, Tuple5<String, Boolean, String, String, String>> contentInfoRDD =
         bamFilterRDD.mapToPair(bamfilter -> {
           GenericRecord mainRecord = bamfilter._1.datum();
@@ -100,46 +97,40 @@ public class CSTESpark {
           String contentSource =
               metaInfo.get("contentSource") == null ? "UNKNOWN" : metaInfo.get("contentSource").toString();
           Fixed trackingk = (Fixed) mainRecord.get("contentClassificationTrackingId");
-          byte[] trackingId =trackingk.bytes();
+          byte[] trackingId = trackingk.bytes();
 
-          //String trackingId = Hex.encodeHexString(tracking.bytes());
+            String country =
+                metaInfo.get("originCountryCode") == null ? "UNKNOWN" : metaInfo.get("originCountryCode").toString();
+            boolean isSpam = (Boolean) mainRecord.get("isSpam");
+            String urn = (String) mainRecord.get("contentUrn");
+            String systemName = mainRecord.get("system") == null ? "UNKNOWN" : mainRecord.get("system").toString();
+            Array<Record> spamOutcome = (Array<Record>) mainRecord.get("spamOutcome");
 
-          String country =
-              metaInfo.get("originCountryCode") == null ? "UNKNOWN" : metaInfo.get("originCountryCode").toString();
-          boolean isSpam = (Boolean) mainRecord.get("isSpam");
-          String urn = (String) mainRecord.get("contentUrn");
-          String systemName = mainRecord.get("system") == null ? "UNKNOWN" : mainRecord.get("system").toString();
-          Array<Record> spamOutcome = (Array<Record>) mainRecord.get("spamOutcome");
+            String spam = spamOutcome.isEmpty() ? "NA" : ((EnumSymbol) spamOutcome.get(0).get(0)).toString();
 
-          String spam = spamOutcome.isEmpty() ? "NA" : ((EnumSymbol) spamOutcome.get(0).get(0)).toString();
+            Tuple3<String, String, byte[]> key = new Tuple3<String, String, byte[]>(date_sk, contentSource, trackingId);
+            Tuple5<String, Boolean, String, String, String> value =
+                new Tuple5<String, Boolean, String, String, String>(country, isSpam, urn, systemName, spam);
 
-          //return new Tuple8<String, String, String, String, Boolean, String, String, String>(date_sk, contentSource,
-           //   trackingId, country, isSpam, urn, systemName, spam);
+            return new Tuple2<Tuple3<String, String, byte[]>, Tuple5<String, Boolean, String, String, String>>(key,
+                value);
 
-          Tuple3<String, String, byte[]> key =new Tuple3<String, String, byte[]>(date_sk, contentSource,trackingId);
-          Tuple5<String, Boolean, String, String, String> value =new Tuple5<String, Boolean, String, String, String>(country, isSpam, urn, systemName, spam) ;
-
-          return new Tuple2<Tuple3<String, String, byte[]>, Tuple5<String, Boolean, String, String, String> >(key,value);
-
-
-        });
+          });
 
 
-   // JavaPairRDD<Tuple3<String, String, byte[]>, Tuple8<String, String, byte[], String, Boolean, String, String, String>> contentGroupRDD=
-     //   contentInfoRDD.keyBy(content -> new Tuple3<String, String, byte[]>(content._1(),content._2(),content._3()));
-
-    JavaPairRDD<Tuple3<String, String, byte[]>, Iterable<Tuple5<String, Boolean, String, String, String>>> groupRDD=
+    JavaPairRDD<Tuple3<String, String, byte[]>, Iterable<Tuple5<String, Boolean, String, String, String>>> groupRDD =
         contentInfoRDD.groupByKey();
 
-    JavaPairRDD<Tuple6<String, String, String, Boolean, String, String>, Integer> spamRDD=
+    JavaPairRDD<Tuple6<String, String, String, Boolean, String, String>, Integer> spamRDD =
         groupRDD.mapToPair(group -> processSpam(group));
 
-    JavaPairRDD<Tuple6<String, String, String, Boolean, String, String>, Integer> finalRDD =spamRDD.reduceByKey((x,y) -> x+y);
+    JavaPairRDD<Tuple6<String, String, String, Boolean, String, String>, Integer> finalRDD =
+        spamRDD.reduceByKey((x, y) -> x + y);
 
     // finalRDD.map(finalRdd -> finalRdd._2).saveAsTextFile("/user/sidas/spark_cste");
-   finalRDD.saveAsTextFile("/user/sidas/spark_cste");
+    finalRDD.saveAsTextFile("/user/sidas/spark_cste");
 
-   // contentInfoRDD.first();
+    // contentInfoRDD.first();
 
     sc.close();
   }
@@ -150,7 +141,7 @@ public class CSTESpark {
   * @throws IOException
   */
 
-  public static Tuple2<Tuple6<String, String, String, Boolean, String, String>,Integer> processSpam(
+  public static Tuple2<Tuple6<String, String, String, Boolean, String, String>, Integer> processSpam(
       Tuple2<Tuple3<String, String, byte[]>, Iterable<Tuple5<String, Boolean, String, String, String>>> group) {
     Tuple5<String, Boolean, String, String, String> element = null;
     Set<String> systemNameSet = new HashSet<String>(3);
@@ -158,10 +149,9 @@ public class CSTESpark {
     Set<String> urnSet = new HashSet<String>(2);
     List<SpamType> spamList = new ArrayList<SpamType>(5);
     String country = "UNKNOWN";
-    String contentSource=group._1._2();
-    String date_sk=null;
-    //new Tuple5<String, Boolean, String, String, String>(country, isSpam, urn, systemName, spam) ;
-    Iterator<Tuple5<String, Boolean, String, String, String>> it= group._2.iterator();
+    String contentSource = group._1._2();
+    String date_sk = null;
+    Iterator<Tuple5<String, Boolean, String, String, String>> it = group._2.iterator();
     while (it.hasNext()) {
       element = it.next();
       isSpamSet.add(element._2());
@@ -174,7 +164,6 @@ public class CSTESpark {
       }
       date_sk = element._1();
     }
-
 
     // Check the size of all container
     if (systemNameSet.isEmpty()) {
@@ -227,9 +216,9 @@ public class CSTESpark {
      * Prepare return Tuple as content_source,isSpam,system_name,spam_type and country.
      */
 
-    String systemName=null;
+    String systemName = null;
     if (systemNameSet.contains("HUMAN")) {
-      systemName="HUMAN";
+      systemName = "HUMAN";
     } else {
       String[] systemArr = new String[systemNameSet.size()];
       systemNameSet.toArray(systemArr);
@@ -237,12 +226,11 @@ public class CSTESpark {
       Arrays.sort(systemArr, cmp);
       systemName = systemArr[0];
     }
-    //return new Tuple7<String, String, String, Boolean, String, String,Integer>(,1);
-
-    Tuple6<String, String, String, Boolean, String, String> key= new Tuple6<String, String, String, Boolean, String, String>( group._1._1(),country, contentSource,
-        isSpamSet.contains(true) ? true : false, systemName, isSpamSet.contains(true) ? spamList.get(0).getSpam()
-            : "NA");
-    return new Tuple2<Tuple6<String, String, String, Boolean, String, String>,Integer>(key,1);
+    Tuple6<String, String, String, Boolean, String, String> key =
+        new Tuple6<String, String, String, Boolean, String, String>(group._1._1(), country, contentSource,
+            isSpamSet.contains(true) ? true : false, systemName, isSpamSet.contains(true) ? spamList.get(0).getSpam()
+                : "NA");
+    return new Tuple2<Tuple6<String, String, String, Boolean, String, String>, Integer>(key, 1);
 
   }
 
@@ -253,17 +241,13 @@ public class CSTESpark {
    * @throws IOException
    */
 
-  public static String epochToDate(long time,String timeFormat,String timeZone) throws IOException
-  {
+  public static String epochToDate(long time, String timeFormat, String timeZone) throws IOException {
     SimpleDateFormat dateParser = new SimpleDateFormat("yyyyMMdd");
-    try
-    {
+    try {
       dateParser.applyPattern(timeFormat);
       dateParser.setTimeZone(TimeZone.getTimeZone(timeZone));
       return dateParser.format(time);
-    }
-    catch (Exception e)
-    {
+    } catch (Exception e) {
       throw new RuntimeException("Caught exception processing input row ", e);
     }
   }
